@@ -11,15 +11,15 @@
     "resolveJsonModule": true,
     "skipLibCheck": true,
     "strict": false,
+    "noEmit": true,
+    "outDir": "./dist",
     "baseUrl": ".",
     "paths": {
       "src/*": [
         "./src/*"
       ]
     },
-    "types": [
-      "bun"
-    ]
+    "types": []
   },
   "include": [
     "src/**/*",
