@@ -1,10 +1,14 @@
-import enMessages from './locales/en.json'
-import zhCNMessages from './locales/zh-CN.json'
+import enusMessages from './locales/en-US.json'
+import zhcnMessages from './locales/zh-CN.json'
 
 type Messages = Record<string, string>
 
-const messages: Messages = { ...(enMessages as Messages), ...(zhCNMessages as Messages) }
+const messages: Messages = { ...(enusMessages as Messages), ...(zhcnMessages as Messages) }
 
-export function t(fallback: string, key: string): string {
-  return messages[key] ?? fallback
+export function t(fallback: string, key: string, ...args: unknown[]): string {
+  const message = messages[key] ?? fallback;
+  return message.replace(/\{([^}]+)\}/g, (_, placeholder) => {
+    const index = parseInt(placeholder, 10);
+    return isNaN(index) ? placeholder : String(args[index]);
+  });
 }
