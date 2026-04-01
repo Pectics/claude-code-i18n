@@ -1,3 +1,4 @@
+import { t } from 'src/i18n/index.js'
 import { getDirectConnectServerUrl, getSessionId } from '../bootstrap/state.js'
 import { stringWidth } from '../ink/stringWidth.js'
 import type { LogOption } from '../types/logs.js'
@@ -96,9 +97,9 @@ export function calculateOptimalLeftWidth(
  */
 export function formatWelcomeMessage(username: string | null): string {
   if (!username || username.length > MAX_USERNAME_LENGTH) {
-    return 'Welcome back!'
+    return t("Welcome back!", "utils.logo.welcome_back")
   }
-  return `Welcome back ${username}!`
+  return t("Welcome back {0}!", "utils.logo.welcome_back_with_name", username)
 }
 
 /**

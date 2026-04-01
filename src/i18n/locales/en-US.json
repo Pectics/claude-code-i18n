@@ -72,6 +72,7 @@
   "commands.resume.description": "Resume a previous conversation",
   "commands.rewind.description": "Restore the code and/or conversation to a previous point",
   "commands.sandbox_toggle.argument_hint": "exclude \"command pattern\"",
+  "commands.sandbox_toggle.description": "{0} {1} (⏎ to configure)",
   "commands.sandbox_toggle.description.status.disabled": "sandbox disabled",
   "commands.sandbox_toggle.description.status.enabled": "sandbox enabled",
   "commands.sandbox_toggle.description.status.enabled.auto_allow_bash": "sandbox enabled (auto-allow)",
