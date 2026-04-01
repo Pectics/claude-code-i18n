@@ -10,6 +10,7 @@
 
 import { readFileSync, writeFileSync } from 'fs'
 import { resolve } from 'path'
+import readline from 'readline'
 
 const args = process.argv.slice(2)
 
@@ -28,8 +29,33 @@ for (let i = 0; i < args.length; i++) {
 }
 
 if (Object.keys(input).length === 0) {
-  console.error('No entries provided. Pass a JSON object or --file <path>.')
-  process.exit(1)
+  // 交互式输入
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  })
+
+  await new Promise<void>(resolve => {
+    rl.question('Enter key: ', (key: string) => {
+      if (!key.trim()) {
+        console.error('Key cannot be empty')
+        rl.close()
+        resolve()
+        process.exit(1)
+      }
+      rl.question('Enter value: ', (value: string) => {
+        if (!value.trim()) {
+          console.error('Value cannot be empty')
+          rl.close()
+          resolve()
+          process.exit(1)
+        }
+        input[key] = value
+        rl.close()
+        resolve()
+      })
+    })
+  })
 }
 
 const localePath = resolve(__dirname, '..', 'src', 'i18n', 'locales', `${locale}.json`)
