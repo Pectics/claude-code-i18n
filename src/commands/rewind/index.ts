@@ -1,7 +1,8 @@
+import { t } from 'src/i18n/index.js'
 import type { Command } from '../../commands.js'
 
 const rewind = {
-  description: `Restore the code and/or conversation to a previous point`,
+  description: t("Restore the code and/or conversation to a previous point", "commands.rewind.description"),
   name: 'rewind',
   aliases: ['checkpoint'],
   argumentHint: '',

@@ -1,11 +1,12 @@
+import { t } from 'src/i18n/index.js'
 import type { Command } from '../../commands.js'
 
 const mcp = {
   type: 'local-jsx',
   name: 'mcp',
-  description: 'Manage MCP servers',
+  description: t("Manage MCP servers", "commands.mcp.description"),
   immediate: true,
-  argumentHint: '[enable|disable [server-name]]',
+  argumentHint: t("[enable|disable [server-name]]", "commands.mcp.argument_hint"),
   load: () => import('./mcp.js'),
 } satisfies Command
 

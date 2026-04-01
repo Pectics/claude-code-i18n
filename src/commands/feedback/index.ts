@@ -1,3 +1,4 @@
+import { t } from 'src/i18n/index.js'
 import type { Command } from '../../commands.js'
 import { isPolicyAllowed } from '../../services/policyLimits/index.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
@@ -7,8 +8,8 @@ const feedback = {
   aliases: ['bug'],
   type: 'local-jsx',
   name: 'feedback',
-  description: `Submit feedback about Claude Code`,
-  argumentHint: '[report]',
+  description: t("Submit feedback about Claude Code", "commands.feedback.description"),
+  argumentHint: t("[report]", "commands.feedback.argument_hint"),
   isEnabled: () =>
     !(
       isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK) ||

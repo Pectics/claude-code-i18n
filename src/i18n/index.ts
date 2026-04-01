@@ -5,7 +5,7 @@ type Messages = Record<string, string>
 
 const messages: Messages = { ...(enusMessages as Messages), ...(zhcnMessages as Messages) }
 
-export function t(fallback: string, key: string, ...args: unknown[]): string {
+export function t(fallback: string, key: string, ...args: any[]): string {
   const message = messages[key] ?? fallback;
   return message.replace(/\{([^}]+)\}/g, (_, placeholder) => {
     const index = parseInt(placeholder, 10);

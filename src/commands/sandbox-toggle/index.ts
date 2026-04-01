@@ -1,6 +1,7 @@
 import figures from 'figures'
 import type { Command } from '../../commands.js'
 import { SandboxManager } from '../../utils/sandbox/sandbox-adapter.js'
+import { t } from 'src/i18n/index.js'
 
 const command = {
   name: 'sandbox',
@@ -19,23 +20,23 @@ const command = {
       icon = currentlyEnabled ? figures.tick : figures.circle
     }
 
-    let statusText = 'sandbox disabled'
+    let statusText = t("sandbox disabled", "commands.sandbox_toggle.description.status.disabled")
     if (currentlyEnabled) {
       statusText = autoAllow
-        ? 'sandbox enabled (auto-allow)'
-        : 'sandbox enabled'
+        ? t("sandbox enabled (auto-allow)", "commands.sandbox_toggle.description.status.enabled.auto_allow_bash")
+        : t("sandbox enabled", "commands.sandbox_toggle.description.status.enabled")
 
       // Add unsandboxed fallback status
-      statusText += allowUnsandboxed ? ', fallback allowed' : ''
+      statusText += allowUnsandboxed ? t(", fallback allowed", "commands.sandbox_toggle.description.status.unsandboxed_commands_allowed") : ''
     }
 
     if (isLocked) {
-      statusText += ' (managed)'
+      statusText += t(" (managed)", "commands.sandbox_toggle.description.status.settings_locked_by_policy")
     }
 
-    return `${icon} ${statusText} (⏎ to configure)`
+    return t("{0} {1} (⏎ to configure)", "commands.sandbox_toggle.description", icon, statusText)
   },
-  argumentHint: 'exclude "command pattern"',
+  argumentHint: t("exclude \"command pattern\"", "commands.sandbox_toggle.argument_hint"),
   get isHidden() {
     return (
       !SandboxManager.isSupportedPlatform() ||

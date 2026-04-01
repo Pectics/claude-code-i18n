@@ -2,13 +2,14 @@
  * Cost command - minimal metadata only.
  * Implementation is lazy-loaded from cost.ts to reduce startup time.
  */
+import { t } from 'src/i18n/index.js'
 import type { Command } from '../../commands.js'
 import { isClaudeAISubscriber } from '../../utils/auth.js'
 
 const cost = {
   type: 'local',
   name: 'cost',
-  description: 'Show the total cost and duration of the current session',
+  description: t("Show the total cost and duration of the current session", "commands.cost.description"),
   get isHidden() {
     // Keep visible for Ants even if they're subscribers (they see cost breakdowns)
     if (process.env.USER_TYPE === 'ant') {

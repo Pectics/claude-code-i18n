@@ -2,14 +2,15 @@
  * Color command - minimal metadata only.
  * Implementation is lazy-loaded from color.ts to reduce startup time.
  */
+import { t } from 'src/i18n/index.js'
 import type { Command } from '../../commands.js'
 
 const color = {
   type: 'local-jsx',
   name: 'color',
-  description: 'Set the prompt bar color for this session',
+  description: t("Set the prompt bar color for this session", "commands.color.description"),
   immediate: true,
-  argumentHint: '<color|default>',
+  argumentHint: t("<color|default>", "commands.color.argument_hint"),
   load: () => import('./color.js'),
 } satisfies Command
 

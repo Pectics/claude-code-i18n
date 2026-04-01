@@ -1,3 +1,4 @@
+import { t } from 'src/i18n/index.js'
 import type { Command } from '../../commands.js'
 import {
   FAST_MODE_MODEL_DISPLAY,
@@ -9,14 +10,14 @@ const fast = {
   type: 'local-jsx',
   name: 'fast',
   get description() {
-    return `Toggle fast mode (${FAST_MODE_MODEL_DISPLAY} only)`
+    return t("Toggle fast mode ({0} only)", "commands.fast.description", FAST_MODE_MODEL_DISPLAY)
   },
   availability: ['claude-ai', 'console'],
   isEnabled: () => isFastModeEnabled(),
   get isHidden() {
     return !isFastModeEnabled()
   },
-  argumentHint: '[on|off]',
+  argumentHint: t("[on|off]", "commands.fast.argument_hint"),
   get immediate() {
     return shouldInferenceConfigCommandBeImmediate()
   },

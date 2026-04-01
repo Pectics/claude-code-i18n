@@ -1,3 +1,4 @@
+import { t } from 'src/i18n/index.js'
 import type { Command } from '../../commands.js'
 import { env } from '../../utils/env.js'
 
@@ -14,8 +15,8 @@ const terminalSetup = {
   name: 'terminal-setup',
   description:
     env.terminal === 'Apple_Terminal'
-      ? 'Enable Option+Enter key binding for newlines and visual bell'
-      : 'Install Shift+Enter key binding for newlines',
+      ? t("Enable Option+Enter key binding for newlines and visual bell", "commands.terminal_setup.description.apple")
+      : t("Install Shift+Enter key binding for newlines", "commands.terminal_setup.description"),
   isHidden: env.terminal !== null && env.terminal in NATIVE_CSIU_TERMINALS,
   load: () => import('./terminalSetup.js'),
 } satisfies Command

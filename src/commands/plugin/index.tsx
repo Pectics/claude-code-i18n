@@ -1,9 +1,10 @@
+import { t } from 'src/i18n/index.js';
 import type { Command } from '../../commands.js';
 const plugin = {
   type: 'local-jsx',
   name: 'plugin',
   aliases: ['plugins', 'marketplace'],
-  description: 'Manage Claude Code plugins',
+  description: t("Manage Claude Code plugins", "commands.plugin.description"),
   immediate: true,
   load: () => import('./plugin.js')
 } satisfies Command;
