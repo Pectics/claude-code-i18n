@@ -55,36 +55,109 @@ This is a reconstructed source tree, not pristine upstream. Some modules use fal
 
 ---
 
-# 🔄 i18n Localization Workflow
+# i18n Localization Workflow
 
-## Quick Start
+## Trigger
 
-**Use `/loop 5m /i18n` to start the self-healing workflow loop.**
+Use `/loop 5m Continue the i18n localization workflow. Read scripts/i18n-progress.json to determine where to resume, then process the next pending module.` to start the self-healing workflow loop.
 
-When triggered (manually or by ping), execute the **Workflow Cycle** below.
+When triggered (manually or by loop ping), execute the **Workflow Cycle** below.
 
 ## Workflow Cycle
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  /i18n  or  ping received                               │
-│                                                         │
-│  1. READ PROGRESS  ──→  scripts/i18n-progress.json      │
-│     ↓                                                   │
-│  2. DETERMINE NEXT ──→  Find next unfinished module     │
-│     ↓                                                   │
-│  3. PROCESS MODULE ──→  Scan → Identify → Register      │
-│     ↓                                                   │
-│  4. SAVE PROGRESS  ──→  Update progress + en-US.json    │
-│     ↓                                                   │
-│  5. LOOP or HALT   ──→  Continue next module or stop    │
-│                         if context is getting large     │
-└─────────────────────────────────────────────────────────┘
+1. READ PROGRESS   →  scripts/i18n-progress.json
+2. DETERMINE NEXT  →  Find next unfinished module
+3. PROCESS MODULE  →  Scan → Register keys → Apply t() → Verify
+4. SAVE PROGRESS   →  Update progress + en-US.json
+5. LOOP or HALT    →  Continue or stop if context is large
 ```
 
-## Module Processing Order (Alphabetical)
+## Critical Rules (Read Before Doing Anything)
 
-The following is the **canonical processing order** — every module in `src/` sorted alphabetically. Root-level `.ts`/`.tsx` files are grouped as module `root`.
+### RULE 1: No Module May Be Skipped Without File-Level Evidence
+
+**Every module in `src/` MUST be scanned file-by-file.** You may NOT skip a module based on its name alone (e.g., "ssh sounds internal", "schemas is just types"). A module may only be marked `skipped` if a sub-agent has actually read every file in it and confirmed there are zero UI-facing strings. The `reason` field must list the files examined.
+
+### RULE 2: Every Key Registered MUST Have a Corresponding t() Call
+
+A key in `en-US.json` without a `t()` call in source code is useless. The workflow is: **register key AND apply t() in the same step, then verify both exist.** Never batch-register keys to en-US.json without simultaneously modifying the source files.
+
+### RULE 3: Locale Values Must Use {0} Placeholder Format, NEVER ${...}
+
+The `t()` function uses positional `{0}`, `{1}`, `{2}` placeholders. The values in `en-US.json` must NEVER contain TypeScript template literal syntax like `${variable}`, `${expr.prop}`, or `${fn(x)}`.
+
+**CORRECT:**
+```json
+"bridge.error.version_too_old": "Your version ({0}) is too old. Version {1} or higher is required."
+```
+
+**WRONG (will break at runtime):**
+```json
+"bridge.error.version_too_old": "Your version (${MACRO.VERSION}) is too old. Version ${config.minVersion} or higher is required."
+```
+
+### RULE 4: t() Function Has Two Calling Patterns
+
+```typescript
+// Pattern A: Static string (no interpolation)
+t('Some fixed message', 'module.category.key')
+
+// Pattern B: Dynamic string with positional args
+t('Found {0} files in {1}', 'module.category.key', count, dir)
+```
+
+**Signature:** `t(fallback: string, key: string, ...args: unknown[]): string`
+- First arg = English fallback (always a plain string literal with `{0}` placeholders, NOT a template literal)
+- Second arg = i18n key
+- Remaining args = values to substitute for `{0}`, `{1}`, etc.
+
+**WRONG patterns (do NOT produce these):**
+```typescript
+// WRONG: template literal as fallback
+t(`Found ${count} files`, 'key', count)
+
+// WRONG: reversed argument order
+t('module.key', 'Found files')
+
+// WRONG: no key
+t('Some message')
+```
+
+### RULE 5: Strict Sub-Agent Usage for Context Protection
+
+The main agent MUST NOT read source files directly. All file reading and scanning is done by sub-agents. The main agent only:
+1. Reads/writes `scripts/i18n-progress.json`
+2. Orchestrates sub-agents
+3. Runs `bun scripts/append-i18n.ts` for batch key registration
+4. Updates progress tracking
+
+**Sub-agent responsibilities and limits:**
+- Each sub-agent handles **at most 5 files** per invocation
+- Each sub-agent MUST return: `{ file, keysFound: [{literal, key, line, confidence}], importNeeded: boolean }`
+- For modules with >5 files, spawn multiple sub-agents (can run in parallel)
+
+### RULE 6: Mandatory Verification Pass
+
+After processing each module, spawn a **separate verification sub-agent** that:
+1. Reads every file in the module that was modified
+2. Confirms each registered key has a matching `t()` call in source
+3. Confirms every `t()` call has its key present in en-US.json
+4. Confirms no `${...}` patterns exist in en-US.json values for this module's keys
+5. Confirms the `import { t } from '../i18n'` (correct relative path) is present in every modified file
+6. Returns a pass/fail report with specific issues
+
+If verification fails, fix the issues before marking the module as done.
+
+### RULE 7: One Module Per Cycle, Then Evaluate Context
+
+Process exactly ONE module per workflow trigger. After completing a module (including verification), evaluate whether to continue:
+- If the conversation has fewer than ~30 tool calls so far, continue to the next module
+- Otherwise, save progress and halt — the loop will resume in the next cycle
+
+## Module Processing Order
+
+Every module in `src/` sorted alphabetically. Root-level files are grouped as `root`.
 
 ```
  1. root              (*.ts/*.tsx directly under src/)
@@ -129,93 +202,136 @@ The following is the **canonical processing order** — every module in `src/` s
 40. voice
 ```
 
+Only modules 14, 31, and 36 may be marked `skipped` without scanning. ALL other modules require file-by-file scanning.
+
 ## Step-by-Step: Processing a Single Module
 
-### Step 1 — List Files
+### Phase 1 — List Files
 
-Use `Glob` to list all `.ts`/`.tsx` files in the module directory. For `root`, glob `src/*.ts` and `src/*.tsx`.
+Use `Glob` to list all `.ts`/`.tsx` files. For `root`, glob `src/*.ts` and `src/*.tsx`.
 
-### Step 2 — Scan Each File (use sub-agents!)
+### Phase 2 — Scan Files (Sub-Agents)
 
-**Critical: Use Agent tool with subagent_type=Explore or general-purpose agents** to scan files. This protects the main context window.
+Spawn sub-agents (max 5 files each) with this exact prompt template:
 
-For each file, the scanning agent should:
-1. Read the file content
-2. Identify all **string literals** that appear in UI-facing positions:
-   - JSX text content and attributes (`<Text>`, `placeholder=`, `label=`, `title=`, etc.)
-   - Arguments to logging/display functions (`console.log` visible to user, `chalk.*`, `render()`)
-   - Error messages shown to the user (not internal error codes)
-   - CLI help text, descriptions, prompts, status messages
-   - Template literals that produce user-visible output
-3. **EXCLUDE** the following (do NOT register these):
-   - Enum values, type literals, discriminated union tags
-   - Object keys, property names, internal identifiers
-   - File paths, URLs, regex patterns, ANSI codes
-   - Agent/LLM system prompts and tool descriptions
-   - Log-level identifiers (`'info'`, `'debug'`, `'error'`)
-   - Import paths, module names
-   - Test fixtures and mock data
-   - CSS class names, HTML tag names
-   - Constants used as internal protocol values
-4. Return a structured list: `{ literal, suggestedKey, filePath, lineNumber, confidence }`
-   - `confidence`: `high` (definitely UI), `medium` (likely UI), `low` (uncertain)
+```
+You are scanning source files for UI-facing string literals that need i18n.
 
-### Step 3 — Design i18n Keys
+For each file, READ the entire file and identify string literals in these positions:
+- JSX text content: <Text>...</Text>, <Box>...</Box> children
+- JSX attributes: placeholder=, label=, title=, description=
+- chalk.* calls: chalk.red('...'), chalk.bold('...')
+- console.log/warn/error that are user-facing CLI output
+- Error messages in throw/reject that surface to the user
+- Status messages, prompts, help text, descriptions
+- Template literals producing user-visible output
 
-Key format: `{module}.{category}.{descriptor}`
+EXCLUDE (do NOT report):
+- Enum values, type literals, union tags, object keys
+- File paths, URLs, regex, ANSI codes
+- Agent/LLM system prompts and tool descriptions (long multi-line strings describing agent behavior)
+- Internal identifiers, log-level strings ('info','debug')
+- Import paths, module names, CSS classes, HTML tags
+- Format patterns ('YYYY-MM-DD'), technical terms ('WebSocket')
+- Strings already wrapped in t()
 
-Examples:
-| Literal | File | Key |
-|---------|------|-----|
-| `"Warning: Multiple installations found"` | `src/cli/update.ts` | `cli.warning.multiple_installation` |
-| `"Select a model"` | `src/components/ModelPicker.tsx` | `components.model_picker.select_model` |
-| `"Failed to connect"` | `src/bridge/client.ts` | `bridge.error.failed_to_connect` |
-| `"Yes"` / `"No"` (used everywhere) | multiple | `general.yes` / `general.no` |
+For each found literal, output:
+{
+  "file": "<path>",
+  "line": <number>,
+  "literal": "<the string>",
+  "key": "<module>.<category>.<descriptor>",
+  "hasInterpolation": <boolean>,
+  "placeholders": ["description of {0}", "description of {1}"],
+  "confidence": "high|medium|low"
+}
 
-Rules:
-- First key part = module name (or `general` for heavily reused short strings)
-- Use snake_case for all key parts
-- Keep keys concise but descriptive
-- Group by semantic category when natural (`error`, `warning`, `label`, `action`, `status`, `prompt`, `help`)
+Key naming rules:
+- Format: {module}.{category}.{descriptor}
+- module = directory name (or 'general' for heavily reused strings)
+- category = error|warning|label|action|status|prompt|help|info
+- descriptor = snake_case, concise but descriptive
+- For strings used across many modules, use 'general.' prefix
 
-### Step 4 — Register to en-US.json
-
-Use the helper script `scripts/append-i18n.ts` (auto-created on first run) to batch-append entries:
-
-```bash
-bun scripts/append-i18n.ts '{"cli.warning.multiple_installation":"Warning: Multiple installations found"}'
+Files to scan: [list provided by orchestrator]
 ```
 
-This avoids repeatedly reading/writing the full JSON file.
+### Phase 3 — Register Keys and Apply t()
 
-### Step 5 — Apply `t()` in Source Files
+For each batch of scan results:
 
-Replace the original literal with a `t()` call:
+1. **Build the key-value JSON** for `en-US.json`:
+   - Static strings: `"key": "The exact string"`
+   - Dynamic strings: Convert `${expr}` to `{0}`, `{1}`, etc. in order of appearance
+   - Example: `` `Found ${count} files in ${dir}` `` → `"Found {0} files in {1}"`
 
+2. **Register keys** via the append script:
+   ```bash
+   bun scripts/append-i18n.ts '{"key1":"value1","key2":"value2"}'
+   ```
+
+3. **Apply t() calls** in source files using the Edit tool:
+   - Static: `t('English fallback', 'module.category.key')`
+   - Dynamic: `t('Found {0} files in {1}', 'module.category.key', count, dir)`
+   - Add `import { t } from '../i18n'` (adjust relative path) if not already present
+
+**IMPORTANT:** When converting template literals with interpolation:
 ```typescript
-// Before:
-const msg = "Warning: Multiple installations found"
+// Source has:
+const msg = `Connection lost (code ${closeCode})`
 
-// After:
-import { t } from '../i18n'
-const msg = t("Warning: Multiple installations found", "cli.warning.multiple_installation")
+// en-US.json gets:
+"bridge.error.connection_lost": "Connection lost (code {0})"
+
+// Source becomes:
+const msg = t('Connection lost (code {0})', 'bridge.error.connection_lost', closeCode)
+```
+The fallback string in `t()` MUST be a regular string literal with `{0}` placeholders, NOT a template literal with `${...}`.
+
+### Phase 4 — Verification (Sub-Agent)
+
+Spawn a verification sub-agent with this prompt:
+
+```
+You are verifying i18n changes for the [MODULE] module.
+
+For each file listed below, READ the file and check:
+1. Every t() call has exactly 2+ arguments: t(fallback, key, ...args)
+2. The fallback (first arg) is a plain string literal, NOT a template literal
+3. The key (second arg) matches a key that should exist in en-US.json
+4. If the fallback contains {0}, {1} etc., corresponding args are passed
+5. The import { t } from '[correct relative path]/i18n' is present
+6. No untranslated UI-facing string literals remain (that should have been caught)
+
+Also verify the en-US.json entries for this module's keys:
+- No ${...} syntax in values (must use {0} format)
+- Values match the fallback strings in t() calls
+
+Return a JSON report:
+{
+  "passed": boolean,
+  "issues": [{"file": "...", "line": N, "issue": "description"}],
+  "keysVerified": N,
+  "filesChecked": N
+}
+
+Files to verify: [list provided by orchestrator]
 ```
 
-**Note:** `t(fallback, key, ...args)` — the first argument is always the English fallback, second is the key.
+### Phase 5 — Update Progress
 
-For template literals with interpolation:
-```typescript
-// Before:
-const msg = `Found ${count} files in ${dir}`
-
-// After:
-const msg = t(`Found ${count} files in ${dir}`, "cli.status.found_files", count, dir)
-// And register: "cli.status.found_files": "Found {0} files in {1}"
+Update `scripts/i18n-progress.json`:
+```json
+{
+  "module_name": {
+    "status": "done",
+    "files_total": N,
+    "files_modified": N,
+    "keys_registered": N,
+    "verified": true
+  }
+}
 ```
-
-### Step 6 — Update Progress
-
-Update `scripts/i18n-progress.json` to mark the module as done.
 
 ## Progress Tracking
 
@@ -223,14 +339,14 @@ File: `scripts/i18n-progress.json`
 
 ```json
 {
-  "current_module": "cli",
-  "current_file_index": 3,
+  "current_module": "bridge",
+  "current_file_index": 0,
+  "workflow_complete": false,
   "modules": {
-    "root": { "status": "done", "files_total": 15, "keys_registered": 42 },
-    "assistant": { "status": "done", "files_total": 8, "keys_registered": 12 },
-    "bootstrap": { "status": "skipped", "reason": "no UI strings" },
-    "bridge": { "status": "in_progress", "files_total": 20, "files_done": 5, "keys_registered": 8 },
-    "cli": { "status": "pending" }
+    "root": { "status": "done", "files_total": 22, "files_modified": 15, "keys_registered": 42, "verified": true },
+    "assistant": { "status": "done", "files_total": 8, "files_modified": 3, "keys_registered": 12, "verified": true },
+    "bootstrap": { "status": "skipped", "reason": "Scanned 3 files (bootstrapMacro.ts, bootstrap-entry.ts, bootstrap.ts): no UI-facing strings, only internal module initialization", "files_examined": 3 },
+    "bridge": { "status": "in_progress", "files_total": 20, "files_done": 5, "keys_registered": 8 }
   },
   "ambiguous": [
     { "file": "src/bridge/auth.ts", "line": 42, "literal": "session expired", "reason": "might be internal log only" }
@@ -244,54 +360,66 @@ File: `scripts/i18n-progress.json`
 }
 ```
 
-- `ambiguous` array holds items needing human review
-- On each cycle, read this file first to determine where to resume
+Fields explained:
+- `files_modified`: files that actually had t() calls added (not just scanned)
+- `verified`: true only after Phase 4 verification passes
+- `ambiguous`: items needing human review — always log rather than guess
+- `status: "skipped"` requires `reason` with specific file names examined
 
-## Context Protection Strategies
+## Key Naming Convention
 
-1. **Sub-agents for scanning**: Always delegate file reading and literal identification to sub-agents. The main agent only orchestrates.
-2. **Batch JSON writes**: Use `scripts/append-i18n.ts` instead of editing en-US.json directly.
-3. **Paginated reading**: For large files (>200 lines), read in chunks using `offset`/`limit` on the Read tool.
-4. **Progress file as checkpoint**: If context gets large, stop gracefully — the progress file ensures seamless resume.
-5. **One module per cycle**: Process one module, save progress, then evaluate whether to continue or yield.
+Format: `{module}.{category}.{descriptor}`
 
-## Helper Scripts
+| Category | Use for |
+|----------|---------|
+| `error` | Error messages shown to user |
+| `warning` | Warning messages |
+| `label` | UI labels, field names |
+| `action` | Button text, action descriptions |
+| `status` | Status messages, progress indicators |
+| `prompt` | Prompts asking for user input |
+| `help` | Help text, descriptions, usage info |
+| `info` | Informational messages |
 
-### `scripts/append-i18n.ts`
-
-Accepts a JSON object of key-value pairs and merges them into `src/i18n/locales/en-US.json`, preserving alphabetical key order.
-
-### `scripts/scan-module.ts` (optional)
-
-A lightweight scanner that lists string literals in a file with line numbers, to assist sub-agents.
+Examples:
+| Literal | Key |
+|---------|-----|
+| `"Warning: Multiple installations found"` | `cli.warning.multiple_installation` |
+| `"Select a model"` | `components.model_picker.select_model` |
+| `"Failed to connect"` | `bridge.error.connect_failed` |
+| `"Yes"` / `"No"` (cross-module) | `general.yes` / `general.no` |
 
 ## Decision Rules for Ambiguous Cases
 
 | Situation | Action |
 |-----------|--------|
-| String is in a `throw new Error(...)` | Register if the error message is shown to the user via UI; skip if caught internally |
-| String is in `console.error(...)` | Register if it's a CLI user-facing message; skip if it's a debug log |
-| String is a single word like `"loading"` | Register if rendered in UI; skip if it's an internal state string |
-| String appears in both UI and agent prompt | Register only the UI occurrence |
-| String is a format pattern like `"YYYY-MM-DD"` | Skip — not translatable |
-| String is a technical term like `"WebSocket"` | Skip — universal terminology |
+| String in `throw new Error(...)` | Register if error surfaces to CLI user; skip if caught internally |
+| String in `console.error(...)` | Register if it's CLI user-facing output; skip if debug/internal log |
+| Single word like `"loading"` | Register if rendered in UI (JSX, chalk); skip if internal state |
+| String in both UI and agent prompt | Register only the UI occurrence |
+| Format pattern `"YYYY-MM-DD"` | Skip |
+| Technical term `"WebSocket"` | Skip |
+| Long multi-line string describing agent behavior | Skip — this is a system prompt |
+| String only used as object key or map lookup | Skip |
+| Module name sounds "internal" (ssh, remote, etc.) | **STILL SCAN IT** — module names say nothing about UI content |
 
-## Self-Healing Loop
+## Context Protection Strategy
 
-The `/loop 5m /i18n` command ensures the workflow automatically resumes if interrupted:
+1. **Main agent never reads source files** — all scanning/editing delegated to sub-agents
+2. **Max 5 files per sub-agent** — prevents any single agent from overloading context
+3. **Batch JSON writes** via `scripts/append-i18n.ts` — avoids editing en-US.json directly
+4. **One module per cycle** — complete, verify, save progress, then evaluate context budget
+5. **Progress file as checkpoint** — enables seamless resume across conversation boundaries
+6. **Separate verification agent** — catches errors before marking done, prevents false "completed" states
 
-1. **Ping received** → Read `scripts/i18n-progress.json`
-2. **If `current_module` has status `in_progress`** → Resume from `current_file_index`
-3. **If `current_module` has status `done`** → Advance to next pending module
-4. **If all modules done** → Report completion, stop the loop
-5. **If main agent is already working** → Ignore the ping
+## Common Mistakes to Avoid
 
-## Verification Checklist (per module)
+These are real mistakes observed in previous runs. Do NOT repeat them:
 
-Before marking a module as `done`:
-- [ ] All `.ts`/`.tsx` files scanned
-- [ ] All UI-facing literals identified and registered in en-US.json
-- [ ] `t()` calls added with correct fallback and key
-- [ ] Import `{ t } from '../i18n'` (or correct relative path) added where needed
-- [ ] No regressions introduced (string interpolation preserved)
-- [ ] Ambiguous items logged to progress file for human review
+1. **Registering keys without adding t() calls** — en-US.json had 1000+ keys but only 16 files imported t()
+2. **Skipping modules by name** — "ssh" was skipped as "internal" without reading a single file
+3. **Using ${...} in locale values** — 36 keys had raw TS template syntax like `${jsonStringify(response.data)}`
+4. **Template literals as t() fallback** — `` t(`Found ${count} files`, 'key') `` is WRONG; must be `t('Found {0} files', 'key', count)`
+5. **Marking modules "done" without verification** — no second pass to confirm changes were actually applied
+6. **Reading large files in main context** — source files should only be read by sub-agents
+7. **Processing too many modules before stopping** — leads to context exhaustion and increasing error rates
